@@ -26,47 +26,58 @@ def init_session():
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
 
-def find_placement_cuan(sponsor_id, members):
+def find_placement_cuan(start_id, members):
     """
     Mencari posisi kosong untuk Auto Cuan (binary tree, prioritas kanan).
     Kembalikan (parent_id, is_left) dengan is_left=True untuk anak kiri, False untuk kanan.
     """
-    queue = deque([sponsor_id])
+    queue = deque([start_id])
     while queue:
         node_id = queue.popleft()
         node = members[node_id]
+        # Prioritas kanan
         if node.right_child_id is None:
             return node_id, False
         if node.left_child_id is None:
             return node_id, True
-        # Kedua anak penuh, lanjutkan BFS dengan prioritas kanan dulu
+        # Jika penuh, lanjutkan BFS (kanan dulu)
         if node.right_child_id:
             queue.append(node.right_child_id)
         if node.left_child_id:
             queue.append(node.left_child_id)
-    return sponsor_id, True
+    return start_id, True  # fallback
 
 def register_member(sponsor_id, name):
     """
-    Registrasi member baru sesuai dokumen:
-    - Auto Rich: sponsor = sponsor_id (langsung, tanpa spillover)
-    - Auto Cuan: placement = hasil find_placement_cuan(sponsor_id)
+    Registrasi member baru.
+    Auto Rich: sponsor = sponsor_id (langsung, tanpa spillover)
+    Auto Cuan: placement = hasil find_placement_cuan(sponsor_id)
     """
     members = st.session_state.members
+    # Validasi sponsor
     if sponsor_id not in members:
-        return None, "Sponsor tidak valid"
+        return None, f"Sponsor ID {sponsor_id} tidak ditemukan."
+    
     new_id = st.session_state.next_id
     st.session_state.next_id += 1
+    
+    # Cari parent untuk Auto Cuan (placement tree)
     parent_id, is_left = find_placement_cuan(sponsor_id, members)
+    
+    # Buat member baru
     new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
+    
+    # Update hubungan di parent (Auto Cuan)
     parent = members[parent_id]
     if not is_left:
         parent.right_child_id = new_id
     else:
         parent.left_child_id = new_id
+    
     posisi = "kanan" if not is_left else "kiri"
-    info = f"Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id}) | Auto Rich: sponsor = {members[sponsor_id].name}"
+    info = (f"✅ Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id})\n"
+            f"✅ Auto Rich: sponsor langsung = {members[sponsor_id].name} (ID:{sponsor_id})")
     return new_member, info
 
 def get_ancestors_cuan(member_id, members, max_level=7):
@@ -181,11 +192,7 @@ def get_member_tree_rich(root_id, members):
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
 def create_sample_10_binary():
-    """
-    Membuat 10 member baru dengan sponsor = Perusahaan (ID 1).
-    Auto Rich: semuanya menjadi downline langsung Perusahaan.
-    Auto Cuan: membentuk binary tree dengan spillover prioritas kanan.
-    """
+    """Membuat 10 member dengan sponsor = Perusahaan (ID 1)"""
     members = st.session_state.members
     if len(members) > 1:
         st.warning("Jaringan sudah memiliki member. Reset terlebih dahulu.")
@@ -197,7 +204,7 @@ def create_sample_10_binary():
             st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    st.info("Sample 10 member dengan sponsor = Perusahaan selesai. Cek visualisasi Auto Cuan untuk melihat bentuk binary tree.")
+    st.info("Sample 10 member (sponsor=Perusahaan) selesai. Cek visualisasi Auto Cuan dan Auto Rich.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
@@ -214,7 +221,7 @@ def main():
     init_session()
 
     with st.sidebar:
-        st.header("🛠️ Sample Jaringan")
+        st.header("🛠️ Sample")
         if st.button("🌳 Sample 10 Member Binary", use_container_width=True):
             create_sample_10_binary()
         if st.button("🗑️ Reset Aplikasi", use_container_width=True):
@@ -274,19 +281,23 @@ def main():
         st.dataframe(pd.DataFrame(df_data), use_container_width=True)
 
     elif menu == "Registrasi Member":
-        st.header("📝 Registrasi Member Baru (sesuai dokumen)")
+        st.header("📝 Registrasi Member Baru")
         with st.form("register_form"):
             name = st.text_input("Nama Lengkap")
-            sponsor_options = {m.id: f"{m.name} (ID:{m.id})" for m in members.values()}
-            sponsor_id = st.selectbox("Pilih Sponsor", options=list(sponsor_options.keys()), format_func=lambda x: sponsor_options[x])
-            if st.form_submit_button("Daftarkan"):
+            # Buat list pilihan sponsor (ID dan nama)
+            sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in members.values()]
+            sponsor_id = st.selectbox("Pilih Sponsor", options=sponsor_list, format_func=lambda x: x[1])[0]
+            submitted = st.form_submit_button("Daftarkan")
+            if submitted:
                 if not name.strip():
                     st.error("Nama tidak boleh kosong")
                 else:
                     new, info = register_member(sponsor_id, name.strip())
                     if new:
-                        st.success(f"Member {new.name} (ID:{new.id}) berhasil!")
+                        st.success(f"Member {new.name} (ID:{new.id}) berhasil didaftarkan!")
                         st.info(info)
+                        # Debug: tampilkan sponsor yang digunakan
+                        st.write(f"**Debug:** sponsor_id yang dipilih = {sponsor_id} ({members[sponsor_id].name})")
                     else:
                         st.error(info)
 
