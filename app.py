@@ -7,8 +7,8 @@ class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id
-        self.parent_id = parent_id
+        self.sponsor_id = sponsor_id          # untuk Auto Rich
+        self.parent_id = parent_id            # untuk Auto Cuan (placement)
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -25,7 +25,7 @@ def init_session():
         st.session_state.total_cash_in = 0
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
-        st.session_state.selected_sponsor_id = 1  # default sponsor
+        st.session_state.selected_sponsor_id = 1
 
 def find_placement_cuan(start_id, members):
     queue = deque([start_id])
@@ -82,63 +82,84 @@ def get_ancestors_rich(member_id, members, max_level=7):
     return ancestors
 
 def process_transaction(member_id, amount, apply_to_balance=False):
+    """
+    Aturan baru: 
+    - Jika amount >= 100000 (pembayar aktif) -> hanya Auto Cuan.
+    - Jika amount < 100000 -> hanya Auto Rich.
+    """
     members = st.session_state.members
     if member_id not in members:
         return None
     member = members[member_id]
+    
+    # Update status aktif berdasarkan belanja (untuk Auto Cuan)
     if amount >= 100000:
         member.is_active = True
     else:
         member.is_active = False
+
     if apply_to_balance:
         member.total_spent += amount
         st.session_state.total_cash_in += amount
 
-    bonus_cuan = 0
-    breakdown_cuan = []
-    if member.is_active:
-        ancestors = get_ancestors_cuan(member_id, members)
-        valid = []
-        for anc_id, lvl in ancestors:
-            if members[anc_id].is_active:
-                valid.append((anc_id, lvl))
-            else:
-                break
-        n = len(valid)
-        for i, (anc_id, lvl) in enumerate(valid):
-            komisi = 9000 if i == n-1 else 4000
+    # ----- Jika pembayar aktif (>=100000) -> hanya Auto Cuan -----
+    if amount >= 100000:
+        bonus_cuan = 0
+        breakdown_cuan = []
+        # Komisi matrix
+        if member.is_active:
+            ancestors = get_ancestors_cuan(member_id, members)
+            valid = []
+            for anc_id, lvl in ancestors:
+                if members[anc_id].is_active:
+                    valid.append((anc_id, lvl))
+                else:
+                    break
+            n = len(valid)
+            for i, (anc_id, lvl) in enumerate(valid):
+                komisi = 9000 if i == n-1 else 4000
+                if apply_to_balance:
+                    members[anc_id].balance_cuan += komisi
+                    st.session_state.total_bonus_cuan += komisi
+                bonus_cuan += komisi
+                breakdown_cuan.append((anc_id, f"Matrix Lv{lvl} ({'Last' if i==n-1 else 'Reg'})", komisi))
+        # Bonus sponsor
+        sponsor_id = member.sponsor_id
+        if sponsor_id and sponsor_id in members:
+            komisi_sp = 1000
             if apply_to_balance:
-                members[anc_id].balance_cuan += komisi
-                st.session_state.total_bonus_cuan += komisi
-            bonus_cuan += komisi
-            breakdown_cuan.append((anc_id, f"Matrix Lv{lvl} ({'Last' if i==n-1 else 'Reg'})", komisi))
-    sponsor_id = member.sponsor_id
-    if sponsor_id and sponsor_id in members:
-        komisi_sp = 1000
-        if apply_to_balance:
-            members[sponsor_id].balance_cuan += komisi_sp
-            st.session_state.total_bonus_cuan += komisi_sp
-        bonus_cuan += komisi_sp
-        breakdown_cuan.append((sponsor_id, "Bonus Sponsor", komisi_sp))
-
-    bonus_rich = 0
-    breakdown_rich = []
-    ancestors_rich = get_ancestors_rich(member_id, members)
-    for anc_id, lvl in ancestors_rich:
-        komisi = 5000
-        if apply_to_balance:
-            members[anc_id].balance_rich += komisi
-            st.session_state.total_bonus_rich += komisi
-        bonus_rich += komisi
-        breakdown_rich.append((anc_id, f"Level {lvl}", komisi))
-
-    return {
-        'buyer_name': member.name, 'buyer_id': member_id, 'amount': amount,
-        'member_active': member.is_active,
-        'bonus_cuan': bonus_cuan, 'bonus_rich': bonus_rich,
-        'total_bonus': bonus_cuan + bonus_rich,
-        'breakdown_cuan': breakdown_cuan, 'breakdown_rich': breakdown_rich
-    }
+                members[sponsor_id].balance_cuan += komisi_sp
+                st.session_state.total_bonus_cuan += komisi_sp
+            bonus_cuan += komisi_sp
+            breakdown_cuan.append((sponsor_id, "Bonus Sponsor", komisi_sp))
+        
+        return {
+            'buyer_name': member.name, 'buyer_id': member_id, 'amount': amount,
+            'member_active': member.is_active,
+            'bonus_cuan': bonus_cuan, 'bonus_rich': 0,
+            'total_bonus': bonus_cuan,
+            'breakdown_cuan': breakdown_cuan, 'breakdown_rich': []
+        }
+    
+    # ----- Jika pembayar tidak aktif (<100000) -> hanya Auto Rich -----
+    else:
+        bonus_rich = 0
+        breakdown_rich = []
+        ancestors_rich = get_ancestors_rich(member_id, members)
+        for anc_id, lvl in ancestors_rich:
+            komisi = 5000
+            if apply_to_balance:
+                members[anc_id].balance_rich += komisi
+                st.session_state.total_bonus_rich += komisi
+            bonus_rich += komisi
+            breakdown_rich.append((anc_id, f"Level {lvl}", komisi))
+        return {
+            'buyer_name': member.name, 'buyer_id': member_id, 'amount': amount,
+            'member_active': member.is_active,
+            'bonus_cuan': 0, 'bonus_rich': bonus_rich,
+            'total_bonus': bonus_rich,
+            'breakdown_cuan': [], 'breakdown_rich': breakdown_rich
+        }
 
 def get_member_tree_cuan(root_id, members):
     if root_id not in members:
@@ -181,7 +202,7 @@ def create_sample_10_binary():
             st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    st.info("Sample 10 member (sponsor=Perusahaan) selesai. Cek visualisasi.")
+    st.info("Sample 10 member (sponsor=Perusahaan) selesai.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
@@ -195,6 +216,7 @@ def main():
     st.set_page_config(page_title="K-BBPT Simulator", layout="wide")
     st.title("K-BBPT Simulator Jaringan & Komisi")
     st.markdown("**Auto Cuan** (Binary + Spillover prioritas kanan) | **Auto Rich** (Unlimited Direct)")
+    st.info("Aturan: Transaksi ≥ Rp100.000 → hanya Auto Cuan. Transaksi < Rp100.000 → hanya Auto Rich.")
     init_session()
 
     with st.sidebar:
@@ -230,20 +252,16 @@ def main():
             if res:
                 st.markdown(f"**Pembeli:** {res['buyer_name']} (ID:{res['buyer_id']}) | **Belanja:** Rp{res['amount']:,.0f}")
                 st.markdown(f"**Status Auto Cuan pembeli:** {'✅ Aktif' if res['member_active'] else '❌ Tidak Aktif'}")
-                with st.expander("Auto Cuan (Matrix + Sponsor)", expanded=True):
-                    if res['breakdown_cuan']:
+                if res['bonus_cuan'] > 0:
+                    with st.expander("Auto Cuan (Matrix + Sponsor)", expanded=True):
                         df_c = pd.DataFrame(res['breakdown_cuan'], columns=["Member ID", "Jenis", "Rp"])
                         st.dataframe(df_c, use_container_width=True)
-                        st.write(f"**Total:** Rp{res['bonus_cuan']:,.0f}")
-                    else:
-                        st.write("Tidak ada komisi.")
-                with st.expander("Auto Rich (Flat Rp5.000/ancestor)", expanded=True):
-                    if res['breakdown_rich']:
+                        st.write(f"**Total Auto Cuan:** Rp{res['bonus_cuan']:,.0f}")
+                if res['bonus_rich'] > 0:
+                    with st.expander("Auto Rich (Flat Rp5.000/ancestor)", expanded=True):
                         df_r = pd.DataFrame(res['breakdown_rich'], columns=["Member ID", "Level", "Rp"])
                         st.dataframe(df_r, use_container_width=True)
-                        st.write(f"**Total:** Rp{res['bonus_rich']:,.0f}")
-                    else:
-                        st.write("Tidak ada komisi.")
+                        st.write(f"**Total Auto Rich:** Rp{res['bonus_rich']:,.0f}")
                 st.success(f"**Total komisi:** Rp{res['total_bonus']:,.0f}")
 
         st.subheader("📋 Daftar Member")
@@ -259,14 +277,11 @@ def main():
 
     elif menu == "Registrasi Member":
         st.header("📝 Registrasi Member Baru")
-        # Pastikan selected_sponsor_id ada di session_state
         if 'selected_sponsor_id' not in st.session_state:
             st.session_state.selected_sponsor_id = 1
-        
         with st.form("register_form"):
             name = st.text_input("Nama Lengkap")
             sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in members.values()]
-            # Cari index dari selected_sponsor_id
             current_index = 0
             for i, (sid, _) in enumerate(sponsor_list):
                 if sid == st.session_state.selected_sponsor_id:
@@ -288,7 +303,6 @@ def main():
                     if new_member:
                         st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
                         st.info(info)
-                        # Simpan sponsor yang dipilih agar tidak berubah
                         st.session_state.selected_sponsor_id = sponsor_id
                     else:
                         st.error(info)
@@ -303,8 +317,10 @@ def main():
             if res:
                 st.success(f"Transaksi Rp{amount:,.0f} oleh {members[member_id].name}")
                 st.write(f"**Status Auto Cuan:** {'Aktif' if res['member_active'] else 'Tidak'}")
-                st.write(f"**Bonus Auto Cuan:** Rp{res['bonus_cuan']:,.0f}")
-                st.write(f"**Bonus Auto Rich:** Rp{res['bonus_rich']:,.0f}")
+                if res['bonus_cuan'] > 0:
+                    st.write(f"**Bonus Auto Cuan:** Rp{res['bonus_cuan']:,.0f}")
+                if res['bonus_rich'] > 0:
+                    st.write(f"**Bonus Auto Rich:** Rp{res['bonus_rich']:,.0f}")
                 st.write(f"**Total komisi:** Rp{res['total_bonus']:,.0f}")
             else:
                 st.error("Member tidak valid")
