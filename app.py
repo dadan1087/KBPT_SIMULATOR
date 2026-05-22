@@ -47,7 +47,6 @@ def register_member(sponsor_id, name):
     members = st.session_state.members
     if sponsor_id not in members:
         return None, f"Sponsor ID {sponsor_id} tidak ditemukan."
-    # Validasi duplikat nama
     for m in members.values():
         if m.name.lower() == name.lower():
             return None, f"Nama '{name}' sudah terdaftar. Gunakan nama lain."
@@ -258,12 +257,8 @@ def main():
 
     init_session()
 
-    # Sidebar: pilih member untuk belanja
+    # Sidebar (hanya untuk manajemen dan ringkasan)
     with st.sidebar:
-        st.header("👤 Member yang Berbelanja")
-        member_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
-        current_member_id = st.selectbox("Pilih member", options=list(member_options.keys()), format_func=lambda x: member_options[x])
-        st.markdown("---")
         st.header("🛠️ Manajemen")
         if st.button("🌳 Sample Jaringan 10 Member", use_container_width=True):
             create_sample_network()
@@ -285,6 +280,13 @@ def main():
 
     with tab1:
         st.header("🛒 Toko Produk K-BBPT")
+        # Pilih member yang berbelanja (di dalam tab Belanja)
+        member_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
+        if not member_options:
+            st.warning("Belum ada member. Silakan registrasi terlebih dahulu.")
+            buyer_id = None
+        else:
+            buyer_id = st.selectbox("👤 Member yang berbelanja", options=list(member_options.keys()), format_func=lambda x: member_options[x], key="buyer_select")
         filter_type = st.radio("Tampilkan produk:", ["Semua", "Auto Cuan (wajib)", "Auto Rich (bebas)"], horizontal=True)
         products = [
             {"id": 1, "name": "Paket Keanggotaan Bulanan", "desc": "Wajib Auto Cuan - Minimal belanja Rp100.000", "price": 100000, "type": "cuan"},
@@ -299,10 +301,13 @@ def main():
             filtered = [p for p in products if p['type'] == 'cuan']
         elif filter_type == "Auto Rich (bebas)":
             filtered = [p for p in products if p['type'] == 'rich']
-        cols = st.columns(2)
-        for i, prod in enumerate(filtered):
-            with cols[i % 2]:
-                product_card(prod, current_member_id)
+        if buyer_id:
+            cols = st.columns(2)
+            for i, prod in enumerate(filtered):
+                with cols[i % 2]:
+                    product_card(prod, buyer_id)
+        else:
+            st.info("Silakan registrasi member terlebih dahulu di tab 'Registrasi'.")
 
     with tab2:
         st.header("📊 Dashboard Lengkap")
@@ -330,7 +335,6 @@ def main():
 
     with tab3:
         st.header("📝 Registrasi Member Baru")
-        # Input nama dan pilih sponsor
         new_name = st.text_input("Nama Lengkap", value=st.session_state.reg_name, key="reg_name_input")
         st.session_state.reg_name = new_name
         sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in st.session_state.members.values()]
@@ -347,7 +351,6 @@ def main():
             key="sponsor_select"
         )
         st.session_state.selected_sponsor_id = selected_sponsor[0]
-
         if st.button("Daftarkan", key="register_btn"):
             if not new_name.strip():
                 st.error("Nama tidak boleh kosong")
@@ -356,7 +359,6 @@ def main():
                 if new_member:
                     st.success(f"🎉 Member {new_member.name} (ID:{new_member.id}) berhasil didaftarkan!")
                     st.info(info)
-                    # Clear input nama
                     st.session_state.reg_name = ""
                     st.rerun()
                 else:
