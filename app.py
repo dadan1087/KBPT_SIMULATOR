@@ -31,17 +31,14 @@ def init_session():
         st.session_state.transactions = []
 
 def find_placement_cuan(start_id, members):
-    """Binary tree prioritas kanan (spillover) - BFS dengan kanan didahulukan"""
     queue = deque([start_id])
     while queue:
         node_id = queue.popleft()
         node = members[node_id]
-        # Cek kanan dulu
         if node.right_child_id is None:
             return node_id, False
         if node.left_child_id is None:
             return node_id, True
-        # Jika kedua anak penuh, masukkan ke antrian (kanan dulu, lalu kiri)
         if node.right_child_id:
             queue.append(node.right_child_id)
         if node.left_child_id:
@@ -71,7 +68,6 @@ def register_member(sponsor_id, name):
     return new_member, info
 
 def get_ancestors_cuan(member_id, members, max_level=7):
-    """Ancestor di placement tree (parent_id), dari level 1 (terdekat) ke atas."""
     ancestors = []
     cur = members[member_id].parent_id
     level = 1
@@ -79,7 +75,7 @@ def get_ancestors_cuan(member_id, members, max_level=7):
         ancestors.append((cur, level))
         cur = members[cur].parent_id
         level += 1
-    return ancestors  # [(parent_id, level1), (grandparent, level2), ...]
+    return ancestors
 
 def get_ancestors_rich(member_id, members, max_level=7):
     ancestors = []
@@ -100,27 +96,25 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
         st.session_state.total_cash_in += amount
 
     bonus_cuan = 0
-    breakdown_cuan = []
+    breakdown_cuan = []  # akan berisi (member_id, nama, deskripsi, nominal)
     if member.is_active:
-        ancestors = get_ancestors_cuan(member_id, members)  # dari bawah ke atas
-        # Filter ancestor yang aktif
+        ancestors = get_ancestors_cuan(member_id, members)
         valid = []
         for anc_id, lvl in ancestors:
             if members[anc_id].is_active:
                 valid.append((anc_id, lvl))
             else:
                 break
-        n = len(valid)  # jumlah ancestor aktif dalam rantai
-        # valid[0] = level 1 (parent terdekat), valid[-1] = level tertinggi (paling atas)
+        n = len(valid)
         for i, (anc_id, lvl) in enumerate(valid):
-            # i=0..n-1, yang terakhir (i == n-1) mendapat 9000
             komisi = 9000 if i == n-1 else 4000
             if apply_to_balance:
                 members[anc_id].balance_cuan += komisi
                 st.session_state.total_bonus_cuan += komisi
             bonus_cuan += komisi
-            breakdown_cuan.append((anc_id, f"Matrix Level {lvl} ({'Last Ancestor (Rp9000)' if i==n-1 else 'Reguler Rp4000'})", komisi))
-    # Bonus sponsor
+            nama = members[anc_id].name
+            deskripsi = f"Matrix Level {lvl} ({'Last Ancestor (Rp9000)' if i==n-1 else 'Reguler Rp4000'})"
+            breakdown_cuan.append((anc_id, nama, deskripsi, komisi))
     sponsor_id = member.sponsor_id
     if sponsor_id and sponsor_id in members:
         komisi_sp = 1000
@@ -128,14 +122,15 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
             members[sponsor_id].balance_cuan += komisi_sp
             st.session_state.total_bonus_cuan += komisi_sp
         bonus_cuan += komisi_sp
-        breakdown_cuan.append((sponsor_id, "Bonus Sponsor (Rp1000)", komisi_sp))
+        nama_sp = members[sponsor_id].name
+        breakdown_cuan.append((sponsor_id, nama_sp, "Bonus Sponsor (Rp1000)", komisi_sp))
 
     return {
         'buyer_name': member.name,
         'buyer_id': member_id,
         'amount': amount,
         'member_active': member.is_active,
-        'ancestors_cuan': [(aid, lvl) for aid, lvl in ancestors],  # untuk debugging
+        'ancestors_cuan': [(aid, lvl) for aid, lvl in ancestors],
         'bonus_cuan': bonus_cuan,
         'bonus_rich': 0,
         'total_bonus': bonus_cuan,
@@ -159,7 +154,8 @@ def process_transaction_rich(member_id, amount, apply_to_balance=False):
             members[anc_id].balance_rich += komisi
             st.session_state.total_bonus_rich += komisi
         bonus_rich += komisi
-        breakdown_rich.append((anc_id, f"Level {lvl} (Rp5000)", komisi))
+        nama = members[anc_id].name
+        breakdown_rich.append((anc_id, nama, f"Level {lvl} (Rp5000)", komisi))
     return {
         'buyer_name': member.name,
         'buyer_id': member_id,
@@ -256,7 +252,24 @@ def product_card(product, member_id):
             else:
                 res = process_transaction_rich(member_id, product['price'], apply_to_balance=True)
             if res:
-                # Simpan tracking
+                # Simpan tracking dengan nama
+                tx_detail = []
+                if product['type'] == 'cuan':
+                    for (mid, nama, desc, nominal) in res['breakdown_cuan']:
+                        tx_detail.append({
+                            "Member ID": mid,
+                            "Nama Member": nama,
+                            "Keterangan": desc,
+                            "Nominal (Rp)": nominal
+                        })
+                else:
+                    for (mid, nama, desc, nominal) in res['breakdown_rich']:
+                        tx_detail.append({
+                            "Member ID": mid,
+                            "Nama Member": nama,
+                            "Keterangan": desc,
+                            "Nominal (Rp)": nominal
+                        })
                 tx = {
                     'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     'pembeli': res['buyer_name'],
@@ -264,7 +277,7 @@ def product_card(product, member_id):
                     'nominal': res['amount'],
                     'jenis': 'Auto Cuan' if product['type'] == 'cuan' else 'Auto Rich',
                     'total_komisi': res['total_bonus'],
-                    'detail_komisi': res['breakdown_cuan'] if product['type'] == 'cuan' else res['breakdown_rich']
+                    'detail_komisi': tx_detail
                 }
                 st.session_state.transactions.append(tx)
                 st.success(f"✅ Berhasil membeli {product['name']}!")
@@ -274,9 +287,8 @@ def product_card(product, member_id):
                     if 'ancestors_cuan' in res:
                         for aid, lvl in res['ancestors_cuan']:
                             st.write(f"Level {lvl}: {st.session_state.members[aid].name} (ID:{aid})")
-                    df = pd.DataFrame(res['breakdown_cuan'], columns=["Member ID", "Jenis Komisi", "Nominal"])
-                else:
-                    df = pd.DataFrame(res['breakdown_rich'], columns=["Member ID", "Jenis Komisi", "Nominal"])
+                # Tampilkan breakdown
+                df = pd.DataFrame(tx_detail)
                 st.dataframe(df, use_container_width=True)
                 st.balloons()
             else:
@@ -352,7 +364,7 @@ def main():
         if st.session_state.transactions:
             for tx in reversed(st.session_state.transactions[-20:]):
                 with st.expander(f"{tx['timestamp']} - {tx['pembeli']} belanja Rp{tx['nominal']:,} ({tx['jenis']}) - Total Komisi: Rp{tx['total_komisi']:,}"):
-                    df_tx = pd.DataFrame(tx['detail_komisi'], columns=["Member ID", "Keterangan", "Nominal (Rp)"])
+                    df_tx = pd.DataFrame(tx['detail_komisi'])
                     st.dataframe(df_tx, use_container_width=True)
         else:
             st.info("Belum ada transaksi.")
