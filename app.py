@@ -1,16 +1,14 @@
 import streamlit as st
 from collections import deque
 import pandas as pd
-import random
-from datetime import datetime
 
 # ---------------------------- Data Model ----------------------------
 class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id
-        self.parent_id = parent_id
+        self.sponsor_id = sponsor_id          # untuk Auto Rich
+        self.parent_id = parent_id            # untuk Auto Cuan (placement)
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -27,7 +25,7 @@ def init_session():
         st.session_state.total_cash_in = 0
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
-        st.session_state.selected_sponsor_id = 1
+        st.session_state.selected_sponsor_id = 1  # default sponsor
 
 def find_placement_cuan(start_id, members):
     queue = deque([start_id])
@@ -84,7 +82,6 @@ def get_ancestors_rich(member_id, members, max_level=7):
     return ancestors
 
 def process_transaction_cuan(member_id, amount, apply_to_balance=False):
-    """Proses Auto Cuan (amount >= 100000)"""
     members = st.session_state.members
     member = members[member_id]
     member.is_active = (amount >= 100000)
@@ -127,7 +124,6 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
     }
 
 def process_transaction_rich(member_id, amount, apply_to_balance=False):
-    """Proses Auto Rich (amount berapa pun)"""
     members = st.session_state.members
     member = members[member_id]
     if apply_to_balance:
@@ -152,6 +148,19 @@ def process_transaction_rich(member_id, amount, apply_to_balance=False):
         'breakdown_cuan': [], 'breakdown_rich': breakdown_rich
     }
 
+def get_descendants_rich(root_id, members):
+    """Mengambil semua member yang merupakan descendant dari root di sponsor tree (termasuk root)"""
+    result = []
+    stack = [root_id]
+    while stack:
+        nid = stack.pop()
+        if nid not in result:
+            result.append(nid)
+        for mid, m in members.items():
+            if m.sponsor_id == nid:
+                stack.append(mid)
+    return result
+
 def get_member_tree_cuan(root_id, members):
     if root_id not in members:
         return ""
@@ -171,13 +180,19 @@ def get_member_tree_cuan(root_id, members):
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
 def get_member_tree_rich(root_id, members):
-    if root_id not in members:
+    """Hanya menampilkan subtree dari root_id di sponsor tree"""
+    descendants = get_descendants_rich(root_id, members)
+    if not descendants:
         return ""
     lines = []
-    for nid, node in members.items():
+    # Node labels
+    for nid in descendants:
+        node = members[nid]
         lines.append(f'    "{nid}" [label="{node.name} (ID:{nid})\\nSaldo R: {node.balance_rich:,}"];')
-    for nid, node in members.items():
-        if node.sponsor_id and node.sponsor_id in members:
+    # Edges
+    for nid in descendants:
+        node = members[nid]
+        if node.sponsor_id and node.sponsor_id in descendants:
             lines.append(f'    "{node.sponsor_id}" -> "{nid}";')
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
@@ -204,7 +219,6 @@ def reset_app():
 
 # ---------------------------- UI E-commerce ----------------------------
 def product_card(product, member_id):
-    """Menampilkan satu produk dan tombol beli"""
     col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
         st.image("https://placehold.co/80x80?text=Produk", width=80)
@@ -259,14 +273,13 @@ def main():
         st.metric("Total Bonus", f"Rp{total_bonus:,.0f}")
         st.metric("Nett Perusahaan", f"Rp{nett:,.0f}")
 
-    # Menu utama (tabs)
+    # Main tabs
     tab1, tab2, tab3, tab4 = st.tabs(["🏪 Belanja Produk", "📊 Dashboard", "📝 Registrasi", "🌳 Visualisasi"])
 
     with tab1:
         st.header("🛒 Toko Produk K-BBPT")
         st.markdown("Pilih produk sesuai kebutuhan: **Auto Cuan** (wajib bulanan) atau **Auto Rich** (jualan bebas).")
 
-        # Daftar produk
         products = [
             {"id": 1, "name": "Paket Keanggotaan Bulanan", "desc": "Wajib Auto Cuan - Minimal belanja Rp100.000", "price": 100000, "type": "cuan"},
             {"id": 2, "name": "Paket Keanggotaan Bulanan+", "desc": "Auto Cuan - Belanja lebih untuk stok", "price": 200000, "type": "cuan"},
@@ -276,7 +289,6 @@ def main():
             {"id": 6, "name": "Alat Kesehatan Digital", "desc": "Auto Rich - Harga grosir", "price": 350000, "type": "rich"},
         ]
 
-        # Filter produk berdasarkan jenis
         filter_type = st.radio("Tampilkan produk:", ["Semua", "Auto Cuan (wajib)", "Auto Rich (bebas)"], horizontal=True)
         filtered = products
         if filter_type == "Auto Cuan (wajib)":
@@ -284,7 +296,6 @@ def main():
         elif filter_type == "Auto Rich (bebas)":
             filtered = [p for p in products if p['type'] == 'rich']
 
-        # Tampilkan produk dalam grid
         cols = st.columns(2)
         for i, prod in enumerate(filtered):
             with cols[i % 2]:
@@ -317,6 +328,7 @@ def main():
 
     with tab3:
         st.header("📝 Registrasi Member Baru")
+        # Jangan ubah selected_sponsor_id setelah registrasi
         if 'selected_sponsor_id' not in st.session_state:
             st.session_state.selected_sponsor_id = 1
         with st.form("register_form"):
@@ -338,7 +350,7 @@ def main():
                     if new_member:
                         st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
                         st.info(info)
-                        st.session_state.selected_sponsor_id = sponsor_id
+                        # TIDAK mengubah selected_sponsor_id, biarkan tetap seperti sebelumnya
                     else:
                         st.error(info)
 
