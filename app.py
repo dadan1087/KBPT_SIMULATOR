@@ -25,8 +25,8 @@ def init_session():
         st.session_state.total_cash_in = 0
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
-        st.session_state.selected_sponsor_id = 1  # default sponsor
-        st.session_state.reg_name = ""           # untuk input nama
+        st.session_state.selected_sponsor_id = 1
+        st.session_state.reg_name = ""
 
 def find_placement_cuan(start_id, members):
     queue = deque([start_id])
@@ -47,6 +47,10 @@ def register_member(sponsor_id, name):
     members = st.session_state.members
     if sponsor_id not in members:
         return None, f"Sponsor ID {sponsor_id} tidak ditemukan."
+    # Validasi duplikat nama
+    for m in members.values():
+        if m.name.lower() == name.lower():
+            return None, f"Nama '{name}' sudah terdaftar. Gunakan nama lain."
     new_id = st.session_state.next_id
     st.session_state.next_id += 1
     parent_id, is_left = find_placement_cuan(sponsor_id, members)
@@ -254,11 +258,11 @@ def main():
 
     init_session()
 
-    # Sidebar
+    # Sidebar: pilih member untuk belanja
     with st.sidebar:
-        st.header("👤 Member Aktif")
+        st.header("👤 Member yang Berbelanja")
         member_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
-        current_member_id = st.selectbox("Pilih member yang berbelanja", options=list(member_options.keys()), format_func=lambda x: member_options[x])
+        current_member_id = st.selectbox("Pilih member", options=list(member_options.keys()), format_func=lambda x: member_options[x])
         st.markdown("---")
         st.header("🛠️ Manajemen")
         if st.button("🌳 Sample Jaringan 10 Member", use_container_width=True):
@@ -326,18 +330,15 @@ def main():
 
     with tab3:
         st.header("📝 Registrasi Member Baru")
-        # Gunakan session state untuk menyimpan input nama dan pilihan sponsor
-        if 'reg_name' not in st.session_state:
-            st.session_state.reg_name = ""
-        # Buat list sponsor
+        # Input nama dan pilih sponsor
+        new_name = st.text_input("Nama Lengkap", value=st.session_state.reg_name, key="reg_name_input")
+        st.session_state.reg_name = new_name
         sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in st.session_state.members.values()]
-        # Cari index dari selected_sponsor_id
         current_index = 0
         for i, (sid, _) in enumerate(sponsor_list):
             if sid == st.session_state.selected_sponsor_id:
                 current_index = i
                 break
-        # Selectbox di luar form
         selected_sponsor = st.selectbox(
             "Pilih Sponsor",
             options=sponsor_list,
@@ -345,22 +346,19 @@ def main():
             index=current_index,
             key="sponsor_select"
         )
-        # Update selected_sponsor_id jika berubah
         st.session_state.selected_sponsor_id = selected_sponsor[0]
-        # Input nama
-        name = st.text_input("Nama Lengkap", value=st.session_state.reg_name, key="reg_name_input")
-        st.session_state.reg_name = name
+
         if st.button("Daftarkan", key="register_btn"):
-            if not name.strip():
+            if not new_name.strip():
                 st.error("Nama tidak boleh kosong")
             else:
-                new_member, info = register_member(st.session_state.selected_sponsor_id, name.strip())
+                new_member, info = register_member(st.session_state.selected_sponsor_id, new_name.strip())
                 if new_member:
-                    st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
+                    st.success(f"🎉 Member {new_member.name} (ID:{new_member.id}) berhasil didaftarkan!")
                     st.info(info)
-                    # Reset nama
+                    # Clear input nama
                     st.session_state.reg_name = ""
-                    st.rerun()  # refresh form
+                    st.rerun()
                 else:
                     st.error(info)
 
