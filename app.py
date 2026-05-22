@@ -7,8 +7,8 @@ class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id          # untuk Auto Rich
-        self.parent_id = parent_id            # untuk Auto Cuan (placement)
+        self.sponsor_id = sponsor_id
+        self.parent_id = parent_id
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -25,56 +25,37 @@ def init_session():
         st.session_state.total_cash_in = 0
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
+        st.session_state.selected_sponsor_id = 1  # default sponsor
 
 def find_placement_cuan(start_id, members):
-    """
-    Mencari posisi kosong untuk Auto Cuan (binary tree, prioritas kanan).
-    Kembalikan (parent_id, is_left) dengan is_left=True untuk anak kiri, False untuk kanan.
-    """
     queue = deque([start_id])
     while queue:
         node_id = queue.popleft()
         node = members[node_id]
-        # Prioritas kanan
         if node.right_child_id is None:
             return node_id, False
         if node.left_child_id is None:
             return node_id, True
-        # Jika penuh, lanjutkan BFS (kanan dulu)
         if node.right_child_id:
             queue.append(node.right_child_id)
         if node.left_child_id:
             queue.append(node.left_child_id)
-    return start_id, True  # fallback
+    return start_id, True
 
 def register_member(sponsor_id, name):
-    """
-    Registrasi member baru.
-    Auto Rich: sponsor = sponsor_id (langsung, tanpa spillover)
-    Auto Cuan: placement = hasil find_placement_cuan(sponsor_id)
-    """
     members = st.session_state.members
-    # Validasi sponsor
     if sponsor_id not in members:
         return None, f"Sponsor ID {sponsor_id} tidak ditemukan."
-    
     new_id = st.session_state.next_id
     st.session_state.next_id += 1
-    
-    # Cari parent untuk Auto Cuan (placement tree)
     parent_id, is_left = find_placement_cuan(sponsor_id, members)
-    
-    # Buat member baru
     new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
-    
-    # Update hubungan di parent (Auto Cuan)
     parent = members[parent_id]
     if not is_left:
         parent.right_child_id = new_id
     else:
         parent.left_child_id = new_id
-    
     posisi = "kanan" if not is_left else "kiri"
     info = (f"✅ Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id})\n"
             f"✅ Auto Rich: sponsor langsung = {members[sponsor_id].name} (ID:{sponsor_id})")
@@ -113,7 +94,6 @@ def process_transaction(member_id, amount, apply_to_balance=False):
         member.total_spent += amount
         st.session_state.total_cash_in += amount
 
-    # Auto Cuan
     bonus_cuan = 0
     breakdown_cuan = []
     if member.is_active:
@@ -132,7 +112,6 @@ def process_transaction(member_id, amount, apply_to_balance=False):
                 st.session_state.total_bonus_cuan += komisi
             bonus_cuan += komisi
             breakdown_cuan.append((anc_id, f"Matrix Lv{lvl} ({'Last' if i==n-1 else 'Reg'})", komisi))
-    # Bonus sponsor
     sponsor_id = member.sponsor_id
     if sponsor_id and sponsor_id in members:
         komisi_sp = 1000
@@ -142,7 +121,6 @@ def process_transaction(member_id, amount, apply_to_balance=False):
         bonus_cuan += komisi_sp
         breakdown_cuan.append((sponsor_id, "Bonus Sponsor", komisi_sp))
 
-    # Auto Rich
     bonus_rich = 0
     breakdown_rich = []
     ancestors_rich = get_ancestors_rich(member_id, members)
@@ -192,7 +170,6 @@ def get_member_tree_rich(root_id, members):
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
 def create_sample_10_binary():
-    """Membuat 10 member dengan sponsor = Perusahaan (ID 1)"""
     members = st.session_state.members
     if len(members) > 1:
         st.warning("Jaringan sudah memiliki member. Reset terlebih dahulu.")
@@ -204,7 +181,7 @@ def create_sample_10_binary():
             st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    st.info("Sample 10 member (sponsor=Perusahaan) selesai. Cek visualisasi Auto Cuan dan Auto Rich.")
+    st.info("Sample 10 member (sponsor=Perusahaan) selesai. Cek visualisasi.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
@@ -282,22 +259,37 @@ def main():
 
     elif menu == "Registrasi Member":
         st.header("📝 Registrasi Member Baru")
+        # Pastikan selected_sponsor_id ada di session_state
+        if 'selected_sponsor_id' not in st.session_state:
+            st.session_state.selected_sponsor_id = 1
+        
         with st.form("register_form"):
             name = st.text_input("Nama Lengkap")
-            # Buat list pilihan sponsor (ID dan nama)
             sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in members.values()]
-            sponsor_id = st.selectbox("Pilih Sponsor", options=sponsor_list, format_func=lambda x: x[1])[0]
+            # Cari index dari selected_sponsor_id
+            current_index = 0
+            for i, (sid, _) in enumerate(sponsor_list):
+                if sid == st.session_state.selected_sponsor_id:
+                    current_index = i
+                    break
+            sponsor_choice = st.selectbox(
+                "Pilih Sponsor",
+                options=sponsor_list,
+                format_func=lambda x: x[1],
+                index=current_index
+            )
             submitted = st.form_submit_button("Daftarkan")
             if submitted:
                 if not name.strip():
                     st.error("Nama tidak boleh kosong")
                 else:
-                    new, info = register_member(sponsor_id, name.strip())
-                    if new:
-                        st.success(f"Member {new.name} (ID:{new.id}) berhasil didaftarkan!")
+                    sponsor_id = sponsor_choice[0]
+                    new_member, info = register_member(sponsor_id, name.strip())
+                    if new_member:
+                        st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
                         st.info(info)
-                        # Debug: tampilkan sponsor yang digunakan
-                        st.write(f"**Debug:** sponsor_id yang dipilih = {sponsor_id} ({members[sponsor_id].name})")
+                        # Simpan sponsor yang dipilih agar tidak berubah
+                        st.session_state.selected_sponsor_id = sponsor_id
                     else:
                         st.error(info)
 
