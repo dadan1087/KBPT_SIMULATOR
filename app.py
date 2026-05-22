@@ -48,28 +48,25 @@ def find_placement_cuan(sponsor_id, members):
 
 def register_member(sponsor_id, name):
     """
-    Registrasi member baru.
-    Auto Rich: sponsor langsung = sponsor_id (tanpa spillover).
-    Auto Cuan: placement = hasil find_placement_cuan(sponsor_id).
+    Registrasi member baru sesuai dokumen:
+    - Auto Rich: sponsor = sponsor_id (langsung, tanpa spillover)
+    - Auto Cuan: placement = hasil find_placement_cuan(sponsor_id)
     """
     members = st.session_state.members
     if sponsor_id not in members:
         return None, "Sponsor tidak valid"
     new_id = st.session_state.next_id
     st.session_state.next_id += 1
-    # Tentukan parent untuk Auto Cuan
     parent_id, is_left = find_placement_cuan(sponsor_id, members)
     new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
-    # Update hubungan di parent (Auto Cuan)
     parent = members[parent_id]
     if not is_left:
         parent.right_child_id = new_id
     else:
         parent.left_child_id = new_id
     posisi = "kanan" if not is_left else "kiri"
-    info = (f"✅ Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id})\n"
-            f"✅ Auto Rich: sponsor langsung = {members[sponsor_id].name}")
+    info = f"Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id}) | Auto Rich: sponsor = {members[sponsor_id].name}"
     return new_member, info
 
 def get_ancestors_cuan(member_id, members, max_level=7):
@@ -134,7 +131,7 @@ def process_transaction(member_id, amount, apply_to_balance=False):
         bonus_cuan += komisi_sp
         breakdown_cuan.append((sponsor_id, "Bonus Sponsor", komisi_sp))
 
-    # Auto Rich (flat 5000 per ancestor sponsor)
+    # Auto Rich
     bonus_rich = 0
     breakdown_rich = []
     ancestors_rich = get_ancestors_rich(member_id, members)
@@ -173,10 +170,8 @@ def get_member_tree_cuan(root_id, members):
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
 def get_member_tree_rich(root_id, members):
-    """Pohon Auto Rich berdasarkan sponsor (unlimited direct)"""
     if root_id not in members:
         return ""
-    # Kumpulkan semua node
     lines = []
     for nid, node in members.items():
         lines.append(f'    "{nid}" [label="{node.name} (ID:{nid})\\nSaldo R: {node.balance_rich:,}"];')
@@ -185,43 +180,24 @@ def get_member_tree_rich(root_id, members):
             lines.append(f'    "{node.sponsor_id}" -> "{nid}";')
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
-def create_sample_3_members_under_C():
-    """Membuat skenario: Member C (ID=4) dan 3 member dengan sponsor = C"""
+def create_sample_10_binary():
+    """
+    Membuat 10 member baru dengan sponsor = Perusahaan (ID 1).
+    Auto Rich: semuanya menjadi downline langsung Perusahaan.
+    Auto Cuan: membentuk binary tree dengan spillover prioritas kanan.
+    """
     members = st.session_state.members
-    # Pastikan ada Member C (buat jika belum)
-    member_c = None
-    for m in members.values():
-        if m.name.lower() == "member c":
-            member_c = m
-            break
-    if member_c is None:
-        member_c, _ = register_member(1, "Member C")
-        if member_c is None:
-            st.error("Gagal membuat Member C")
-            return
-        st.info(f"Member C (ID:{member_c.id}) berhasil dibuat.")
-    # Daftarkan 3 member dengan sponsor = Member C
-    for i in range(1, 4):
-        name = f"Member C{i}"
-        new_member, info = register_member(member_c.id, name)
-        if new_member:
-            st.success(f"{name} (ID:{new_member.id}) -> {info}")
+    if len(members) > 1:
+        st.warning("Jaringan sudah memiliki member. Reset terlebih dahulu.")
+        return
+    for i in range(1, 11):
+        name = f"Member {i}"
+        new, info = register_member(1, name)
+        if new:
+            st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    st.subheader("📌 Penjelasan Struktur (Sesuai Dokumen)")
-    st.markdown("""
-    **Auto Rich (sponsor tree):**  
-    - Ketiga member (C1, C2, C3) semuanya menjadi **downline langsung** Member C.  
-    - Karena Auto Rich **tidak ada batasan jumlah downline langsung**.
-    
-    **Auto Cuan (placement tree - binary dengan spillover prioritas kanan):**  
-    - Hanya maksimal 2 downline langsung per node.  
-    - C1 → anak **kanan** dari C (prioritas kanan)  
-    - C2 → anak **kiri** dari C  
-    - C3 → karena C sudah penuh, di-*spillover* menjadi anak **kanan dari C1** (C1 masih kosong)  
-    
-    ✅ Ini sesuai dengan aturan di dokumen: *"Spillover aktif – jika downline langsung sudah penuh, member baru akan ditempatkan secara otomatis ke level bawah"*.
-    """)
+    st.info("Sample 10 member dengan sponsor = Perusahaan selesai. Cek visualisasi Auto Cuan untuk melihat bentuk binary tree.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
@@ -238,9 +214,9 @@ def main():
     init_session()
 
     with st.sidebar:
-        st.header("🛠️ Contoh Skenario")
-        if st.button("📌 3 Member di Bawah C", use_container_width=True):
-            create_sample_3_members_under_C()
+        st.header("🛠️ Sample Jaringan")
+        if st.button("🌳 Sample 10 Member Binary", use_container_width=True):
+            create_sample_10_binary()
         if st.button("🗑️ Reset Aplikasi", use_container_width=True):
             reset_app()
         st.markdown("---")
@@ -262,7 +238,7 @@ def main():
         nett = st.session_state.total_cash_in - (st.session_state.total_bonus_cuan + st.session_state.total_bonus_rich)
         col6.metric("Nett Perusahaan (Rp)", f"{nett:,.0f}")
 
-        st.subheader("🔍 Alur Komisi (Simulasi)")
+        st.subheader("🔍 Alur Komisi (Simulasi tanpa mengubah saldo)")
         sim_member = st.selectbox("Pilih member yang bertransaksi", options=list(members.keys()), format_func=lambda x: f"{members[x].name} (ID:{x})")
         sim_amount = st.number_input("Nominal Belanja (Rp)", min_value=0, step=10000, value=100000)
         if st.button("Tampilkan Alur Komisi"):
@@ -298,18 +274,18 @@ def main():
         st.dataframe(pd.DataFrame(df_data), use_container_width=True)
 
     elif menu == "Registrasi Member":
-        st.header("📝 Registrasi Member Baru")
+        st.header("📝 Registrasi Member Baru (sesuai dokumen)")
         with st.form("register_form"):
             name = st.text_input("Nama Lengkap")
             sponsor_options = {m.id: f"{m.name} (ID:{m.id})" for m in members.values()}
-            sponsor_id = st.selectbox("Pilih Sponsor (untuk Auto Rich & Auto Cuan)", options=list(sponsor_options.keys()), format_func=lambda x: sponsor_options[x])
+            sponsor_id = st.selectbox("Pilih Sponsor", options=list(sponsor_options.keys()), format_func=lambda x: sponsor_options[x])
             if st.form_submit_button("Daftarkan"):
                 if not name.strip():
                     st.error("Nama tidak boleh kosong")
                 else:
                     new, info = register_member(sponsor_id, name.strip())
                     if new:
-                        st.success(f"Member {new.name} (ID:{new.id}) berhasil didaftarkan!")
+                        st.success(f"Member {new.name} (ID:{new.id}) berhasil!")
                         st.info(info)
                     else:
                         st.error(info)
