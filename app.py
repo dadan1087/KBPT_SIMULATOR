@@ -1,14 +1,15 @@
 import streamlit as st
 from collections import deque
 import pandas as pd
+from datetime import datetime
 
 # ---------------------------- Data Model ----------------------------
 class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id
-        self.parent_id = parent_id
+        self.sponsor_id = sponsor_id          # untuk Auto Rich
+        self.parent_id = parent_id            # untuk Auto Cuan (placement)
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -27,8 +28,10 @@ def init_session():
         st.session_state.total_bonus_rich = 0
         st.session_state.selected_sponsor_id = 1
         st.session_state.reg_name = ""
+        st.session_state.transactions = []   # untuk tracking komisi
 
 def find_placement_cuan(start_id, members):
+    """Binary tree prioritas kanan (spillover)"""
     queue = deque([start_id])
     while queue:
         node_id = queue.popleft()
@@ -66,6 +69,7 @@ def register_member(sponsor_id, name):
     return new_member, info
 
 def get_ancestors_cuan(member_id, members, max_level=7):
+    """Ancestor di placement tree (parent_id), dari level 1 (terdekat) ke atas."""
     ancestors = []
     cur = members[member_id].parent_id
     level = 1
@@ -76,6 +80,7 @@ def get_ancestors_cuan(member_id, members, max_level=7):
     return ancestors
 
 def get_ancestors_rich(member_id, members, max_level=7):
+    """Ancestor di sponsor tree (sponsor_id), dari level 1 (sponsor langsung) ke atas."""
     ancestors = []
     cur = members[member_id].sponsor_id
     level = 1
@@ -86,31 +91,34 @@ def get_ancestors_rich(member_id, members, max_level=7):
     return ancestors
 
 def process_transaction_cuan(member_id, amount, apply_to_balance=False):
+    """Proses Auto Cuan (belanja >= 100000) sesuai dokumen."""
     members = st.session_state.members
     member = members[member_id]
-    member.is_active = (amount >= 100000)
+    member.is_active = (amount >= 100000)  # update status aktif
     if apply_to_balance:
         member.total_spent += amount
         st.session_state.total_cash_in += amount
 
     bonus_cuan = 0
-    breakdown_cuan = []
+    breakdown_cuan = []  # list of (member_id, deskripsi, nominal)
     if member.is_active:
         ancestors = get_ancestors_cuan(member_id, members)
+        # Filter ancestor yang aktif (rantai aktif)
         valid = []
         for anc_id, lvl in ancestors:
             if members[anc_id].is_active:
                 valid.append((anc_id, lvl))
             else:
                 break
-        n = len(valid)
+        n = len(valid)  # jumlah ancestor aktif dalam rantai
         for i, (anc_id, lvl) in enumerate(valid):
-            komisi = 9000 if i == n-1 else 4000
+            komisi = 9000 if i == n-1 else 4000   # last ancestor = 9000
             if apply_to_balance:
                 members[anc_id].balance_cuan += komisi
                 st.session_state.total_bonus_cuan += komisi
             bonus_cuan += komisi
-            breakdown_cuan.append((anc_id, f"Matrix Lv{lvl} ({'Last' if i==n-1 else 'Reg'})", komisi))
+            breakdown_cuan.append((anc_id, f"Matrix Level {lvl} ({'Last' if i==n-1 else 'Reguler'})", komisi))
+    # Bonus sponsor (langsung) Rp1.000
     sponsor_id = member.sponsor_id
     if sponsor_id and sponsor_id in members:
         komisi_sp = 1000
@@ -118,16 +126,22 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
             members[sponsor_id].balance_cuan += komisi_sp
             st.session_state.total_bonus_cuan += komisi_sp
         bonus_cuan += komisi_sp
-        breakdown_cuan.append((sponsor_id, "Bonus Sponsor", komisi_sp))
+        breakdown_cuan.append((sponsor_id, "Bonus Sponsor (langsung)", komisi_sp))
+
     return {
-        'buyer_name': member.name, 'buyer_id': member_id, 'amount': amount,
+        'buyer_name': member.name,
+        'buyer_id': member_id,
+        'amount': amount,
         'member_active': member.is_active,
-        'bonus_cuan': bonus_cuan, 'bonus_rich': 0,
+        'bonus_cuan': bonus_cuan,
+        'bonus_rich': 0,
         'total_bonus': bonus_cuan,
-        'breakdown_cuan': breakdown_cuan, 'breakdown_rich': []
+        'breakdown_cuan': breakdown_cuan,
+        'breakdown_rich': []
     }
 
 def process_transaction_rich(member_id, amount, apply_to_balance=False):
+    """Proses Auto Rich (belanja bebas) – flat 5000 per ancestor sponsor."""
     members = st.session_state.members
     member = members[member_id]
     if apply_to_balance:
@@ -145,14 +159,19 @@ def process_transaction_rich(member_id, amount, apply_to_balance=False):
         bonus_rich += komisi
         breakdown_rich.append((anc_id, f"Level {lvl}", komisi))
     return {
-        'buyer_name': member.name, 'buyer_id': member_id, 'amount': amount,
+        'buyer_name': member.name,
+        'buyer_id': member_id,
+        'amount': amount,
         'member_active': member.is_active,
-        'bonus_cuan': 0, 'bonus_rich': bonus_rich,
+        'bonus_cuan': 0,
+        'bonus_rich': bonus_rich,
         'total_bonus': bonus_rich,
-        'breakdown_cuan': [], 'breakdown_rich': breakdown_rich
+        'breakdown_cuan': [],
+        'breakdown_rich': breakdown_rich
     }
 
 def get_descendants_rich(root_id, members):
+    """Semua descendant (termasuk root) di sponsor tree."""
     result = []
     stack = [root_id]
     while stack:
@@ -234,20 +253,32 @@ def product_card(product, member_id):
         if st.button(f"Beli", key=f"buy_{product['id']}_{member_id}"):
             if product['type'] == 'cuan':
                 res = process_transaction_cuan(member_id, product['price'], apply_to_balance=True)
-                if res:
-                    st.success(f"✅ Berhasil membeli {product['name']}!")
-                    st.info(f"Komisi Auto Cuan: Rp{res['bonus_cuan']:,.0f}")
-                    st.balloons()
-                else:
-                    st.error("Gagal transaksi")
             else:
                 res = process_transaction_rich(member_id, product['price'], apply_to_balance=True)
-                if res:
-                    st.success(f"✅ Berhasil membeli {product['name']}!")
-                    st.info(f"Komisi Auto Rich: Rp{res['bonus_rich']:,.0f}")
-                    st.balloons()
+
+            if res:
+                # Simpan ke tracking komisi
+                transaction_record = {
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'pembeli': res['buyer_name'],
+                    'pembeli_id': res['buyer_id'],
+                    'nominal': res['amount'],
+                    'jenis': 'Auto Cuan' if product['type'] == 'cuan' else 'Auto Rich',
+                    'total_komisi': res['total_bonus'],
+                    'detail_komisi': res['breakdown_cuan'] if product['type'] == 'cuan' else res['breakdown_rich']
+                }
+                st.session_state.transactions.append(transaction_record)
+                st.success(f"✅ Berhasil membeli {product['name']}!")
+                st.info(f"Total Komisi: Rp{res['total_bonus']:,.0f}")
+                # Tampilkan breakdown detail
+                if product['type'] == 'cuan':
+                    df = pd.DataFrame(res['breakdown_cuan'], columns=["Member ID", "Jenis Komisi", "Nominal (Rp)"])
                 else:
-                    st.error("Gagal transaksi")
+                    df = pd.DataFrame(res['breakdown_rich'], columns=["Member ID", "Level", "Nominal (Rp)"])
+                st.dataframe(df, use_container_width=True)
+                st.balloons()
+            else:
+                st.error("Gagal transaksi")
 
 # ---------------------------- Main App ----------------------------
 def main():
@@ -257,7 +288,7 @@ def main():
 
     init_session()
 
-    # Sidebar (hanya untuk manajemen dan ringkasan)
+    # Sidebar
     with st.sidebar:
         st.header("🛠️ Manajemen")
         if st.button("🌳 Sample Jaringan 10 Member", use_container_width=True):
@@ -280,7 +311,6 @@ def main():
 
     with tab1:
         st.header("🛒 Toko Produk K-BBPT")
-        # Pilih member yang berbelanja (di dalam tab Belanja)
         member_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
         if not member_options:
             st.warning("Belum ada member. Silakan registrasi terlebih dahulu.")
@@ -322,6 +352,17 @@ def main():
         col5.metric("Total Bonus Auto Rich", f"{st.session_state.total_bonus_rich:,.0f}")
         nett = st.session_state.total_cash_in - (st.session_state.total_bonus_cuan + st.session_state.total_bonus_rich)
         col6.metric("Nett Perusahaan", f"{nett:,.0f}")
+
+        # Tracking komisi (riwayat transaksi)
+        st.subheader("📜 Riwayat Transaksi & Komisi")
+        if st.session_state.transactions:
+            for tx in reversed(st.session_state.transactions[-20:]):  # tampilkan 20 terakhir
+                with st.expander(f"{tx['timestamp']} - {tx['pembeli']} belanja Rp{tx['nominal']:,} ({tx['jenis']}) - Total Komisi: Rp{tx['total_komisi']:,}"):
+                    df_tx = pd.DataFrame(tx['detail_komisi'], columns=["Member ID", "Keterangan", "Nominal (Rp)"])
+                    st.dataframe(df_tx, use_container_width=True)
+        else:
+            st.info("Belum ada transaksi. Silakan belanja di tab 'Belanja Produk'.")
+
         st.subheader("📋 Daftar Member")
         df_data = []
         for m in st.session_state.members.values():
