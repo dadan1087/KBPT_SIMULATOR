@@ -7,8 +7,8 @@ class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id          # untuk Auto Rich
-        self.parent_id = parent_id            # untuk Auto Cuan (placement)
+        self.sponsor_id = sponsor_id
+        self.parent_id = parent_id
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -26,6 +26,7 @@ def init_session():
         st.session_state.total_bonus_cuan = 0
         st.session_state.total_bonus_rich = 0
         st.session_state.selected_sponsor_id = 1  # default sponsor
+        st.session_state.reg_name = ""           # untuk input nama
 
 def find_placement_cuan(start_id, members):
     queue = deque([start_id])
@@ -149,7 +150,6 @@ def process_transaction_rich(member_id, amount, apply_to_balance=False):
     }
 
 def get_descendants_rich(root_id, members):
-    """Mengambil semua member yang merupakan descendant dari root di sponsor tree (termasuk root)"""
     result = []
     stack = [root_id]
     while stack:
@@ -180,35 +180,38 @@ def get_member_tree_cuan(root_id, members):
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
 def get_member_tree_rich(root_id, members):
-    """Hanya menampilkan subtree dari root_id di sponsor tree"""
     descendants = get_descendants_rich(root_id, members)
     if not descendants:
         return ""
     lines = []
-    # Node labels
     for nid in descendants:
         node = members[nid]
         lines.append(f'    "{nid}" [label="{node.name} (ID:{nid})\\nSaldo R: {node.balance_rich:,}"];')
-    # Edges
     for nid in descendants:
         node = members[nid]
         if node.sponsor_id and node.sponsor_id in descendants:
             lines.append(f'    "{node.sponsor_id}" -> "{nid}";')
     return "digraph G {\n" + "\n".join(lines) + "\n}"
 
-def create_sample_10_binary():
+def create_sample_network():
     members = st.session_state.members
     if len(members) > 1:
         st.warning("Jaringan sudah memiliki member. Reset terlebih dahulu.")
         return
-    for i in range(1, 11):
-        name = f"Member {i}"
-        new, info = register_member(1, name)
+    regs = [
+        (1, "Member 1"), (1, "Member 2"),
+        (2, "Member 3"), (2, "Member 4"),
+        (3, "Member 5"), (3, "Member 6"),
+        (4, "Member 7"), (4, "Member 8"),
+        (5, "Member 9"), (5, "Member 10"),
+    ]
+    for sponsor_id, name in regs:
+        new, info = register_member(sponsor_id, name)
         if new:
             st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    st.info("Sample 10 member (sponsor=Perusahaan) selesai.")
+    st.info("Sample jaringan 10 member selesai.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
@@ -258,8 +261,8 @@ def main():
         current_member_id = st.selectbox("Pilih member yang berbelanja", options=list(member_options.keys()), format_func=lambda x: member_options[x])
         st.markdown("---")
         st.header("🛠️ Manajemen")
-        if st.button("🌳 Sample 10 Member", use_container_width=True):
-            create_sample_10_binary()
+        if st.button("🌳 Sample Jaringan 10 Member", use_container_width=True):
+            create_sample_network()
         if st.button("🗑️ Reset Aplikasi", use_container_width=True):
             reset_app()
         st.markdown("---")
@@ -273,13 +276,12 @@ def main():
         st.metric("Total Bonus", f"Rp{total_bonus:,.0f}")
         st.metric("Nett Perusahaan", f"Rp{nett:,.0f}")
 
-    # Main tabs
+    # Tabs
     tab1, tab2, tab3, tab4 = st.tabs(["🏪 Belanja Produk", "📊 Dashboard", "📝 Registrasi", "🌳 Visualisasi"])
 
     with tab1:
         st.header("🛒 Toko Produk K-BBPT")
-        st.markdown("Pilih produk sesuai kebutuhan: **Auto Cuan** (wajib bulanan) atau **Auto Rich** (jualan bebas).")
-
+        filter_type = st.radio("Tampilkan produk:", ["Semua", "Auto Cuan (wajib)", "Auto Rich (bebas)"], horizontal=True)
         products = [
             {"id": 1, "name": "Paket Keanggotaan Bulanan", "desc": "Wajib Auto Cuan - Minimal belanja Rp100.000", "price": 100000, "type": "cuan"},
             {"id": 2, "name": "Paket Keanggotaan Bulanan+", "desc": "Auto Cuan - Belanja lebih untuk stok", "price": 200000, "type": "cuan"},
@@ -288,14 +290,11 @@ def main():
             {"id": 5, "name": "Paket Herbal (3 botol)", "desc": "Auto Rich - Diskon khusus member", "price": 120000, "type": "rich"},
             {"id": 6, "name": "Alat Kesehatan Digital", "desc": "Auto Rich - Harga grosir", "price": 350000, "type": "rich"},
         ]
-
-        filter_type = st.radio("Tampilkan produk:", ["Semua", "Auto Cuan (wajib)", "Auto Rich (bebas)"], horizontal=True)
         filtered = products
         if filter_type == "Auto Cuan (wajib)":
             filtered = [p for p in products if p['type'] == 'cuan']
         elif filter_type == "Auto Rich (bebas)":
             filtered = [p for p in products if p['type'] == 'rich']
-
         cols = st.columns(2)
         for i, prod in enumerate(filtered):
             with cols[i % 2]:
@@ -314,7 +313,6 @@ def main():
         col5.metric("Total Bonus Auto Rich", f"{st.session_state.total_bonus_rich:,.0f}")
         nett = st.session_state.total_cash_in - (st.session_state.total_bonus_cuan + st.session_state.total_bonus_rich)
         col6.metric("Nett Perusahaan", f"{nett:,.0f}")
-
         st.subheader("📋 Daftar Member")
         df_data = []
         for m in st.session_state.members.values():
@@ -328,31 +326,43 @@ def main():
 
     with tab3:
         st.header("📝 Registrasi Member Baru")
-        # Jangan ubah selected_sponsor_id setelah registrasi
-        if 'selected_sponsor_id' not in st.session_state:
-            st.session_state.selected_sponsor_id = 1
-        with st.form("register_form"):
-            name = st.text_input("Nama Lengkap")
-            sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in st.session_state.members.values()]
-            current_index = 0
-            for i, (sid, _) in enumerate(sponsor_list):
-                if sid == st.session_state.selected_sponsor_id:
-                    current_index = i
-                    break
-            sponsor_choice = st.selectbox("Pilih Sponsor", options=sponsor_list, format_func=lambda x: x[1], index=current_index)
-            submitted = st.form_submit_button("Daftarkan")
-            if submitted:
-                if not name.strip():
-                    st.error("Nama tidak boleh kosong")
+        # Gunakan session state untuk menyimpan input nama dan pilihan sponsor
+        if 'reg_name' not in st.session_state:
+            st.session_state.reg_name = ""
+        # Buat list sponsor
+        sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in st.session_state.members.values()]
+        # Cari index dari selected_sponsor_id
+        current_index = 0
+        for i, (sid, _) in enumerate(sponsor_list):
+            if sid == st.session_state.selected_sponsor_id:
+                current_index = i
+                break
+        # Selectbox di luar form
+        selected_sponsor = st.selectbox(
+            "Pilih Sponsor",
+            options=sponsor_list,
+            format_func=lambda x: x[1],
+            index=current_index,
+            key="sponsor_select"
+        )
+        # Update selected_sponsor_id jika berubah
+        st.session_state.selected_sponsor_id = selected_sponsor[0]
+        # Input nama
+        name = st.text_input("Nama Lengkap", value=st.session_state.reg_name, key="reg_name_input")
+        st.session_state.reg_name = name
+        if st.button("Daftarkan", key="register_btn"):
+            if not name.strip():
+                st.error("Nama tidak boleh kosong")
+            else:
+                new_member, info = register_member(st.session_state.selected_sponsor_id, name.strip())
+                if new_member:
+                    st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
+                    st.info(info)
+                    # Reset nama
+                    st.session_state.reg_name = ""
+                    st.rerun()  # refresh form
                 else:
-                    sponsor_id = sponsor_choice[0]
-                    new_member, info = register_member(sponsor_id, name.strip())
-                    if new_member:
-                        st.success(f"Member {new_member.name} (ID:{new_member.id}) berhasil!")
-                        st.info(info)
-                        # TIDAK mengubah selected_sponsor_id, biarkan tetap seperti sebelumnya
-                    else:
-                        st.error(info)
+                    st.error(info)
 
     with tab4:
         st.header("🌳 Visualisasi Jaringan")
