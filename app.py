@@ -2,6 +2,7 @@ import streamlit as st
 from collections import deque
 import pandas as pd
 from datetime import datetime
+import base64
 
 # ---------------------------- Data Model ----------------------------
 class Member:
@@ -181,11 +182,9 @@ def get_descendants_rich(root_id, members):
     return result
 
 def get_member_tree_cuan(root_id, members, search_id=None):
-    """Mengembalikan string DOT graph dengan layout top-bottom (root di atas)"""
     if root_id not in members:
         return ""
     lines = ['digraph G {', '    rankdir=TB;', '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial"];']
-    # Tambahkan margin agar tidak terpotong
     lines.append('    margin=0;')
     queue = deque([root_id])
     while queue:
@@ -212,7 +211,6 @@ def get_member_tree_cuan(root_id, members, search_id=None):
     return "\n".join(lines)
 
 def get_member_tree_rich(root_id, members, search_id=None):
-    """Mengembalikan string DOT graph untuk sponsor tree, top-bottom"""
     descendants = get_descendants_rich(root_id, members)
     if not descendants:
         return ""
@@ -445,14 +443,28 @@ def main():
                     break
             if search_id is None:
                 st.warning("Member tidak ditemukan.")
-        # Tampilkan grafik
+        
+        # Generate DOT
         if net_type == "Auto Cuan (Binary / Placement)":
             dot = get_member_tree_cuan(root_id, st.session_state.members, search_id)
         else:
             dot = get_member_tree_rich(root_id, st.session_state.members, search_id)
+        
         if dot:
-            st.graphviz_chart(dot)
-            st.caption("💡 Tips: Gunakan Ctrl + Scroll untuk zoom. Klik kanan pada gambar untuk menyimpan.")
+            # Tampilkan slider zoom
+            zoom = st.slider("🔍 Zoom (Ctrl+Scroll juga bisa)", min_value=0.5, max_value=3.0, value=1.0, step=0.1)
+            # Bungkus grafik dalam div dengan overflow auto dan transform scale
+            st.markdown(
+                f"""
+                <div style="overflow: auto; border: 1px solid #ddd; border-radius: 5px; padding: 10px;">
+                    <div style="transform: scale({zoom}); transform-origin: top left; width: fit-content;">
+                    {st.graphviz_chart(dot, use_container_width=False)}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            st.caption("💡 Tips: Gunakan slider di atas untuk zoom. Klik kanan pada grafik untuk menyimpan sebagai gambar.")
         else:
             st.warning("Pohon kosong atau root tidak ditemukan.")
 
