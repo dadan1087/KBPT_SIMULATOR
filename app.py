@@ -29,6 +29,13 @@ def init_session():
         st.session_state.selected_sponsor_id = 1
         st.session_state.reg_name = ""
         st.session_state.transactions = []
+        # Default komisi (bisa diubah user)
+        st.session_state.komisi_reguler = 4000
+        st.session_state.komisi_last_ancestor = 9000
+        st.session_state.komisi_sponsor = 1000
+        st.session_state.komisi_rich_per_level = 5000
+        st.session_state.max_level = 7
+        st.session_state.last_ancestor_position = "Level Tertinggi (paling dekat root)"  # atau "Level Terendah (parent langsung)"
 
 def find_placement_cuan(start_id, members):
     queue = deque([start_id])
@@ -67,7 +74,7 @@ def register_member(sponsor_id, name):
             f"✅ Auto Rich: sponsor langsung = {members[sponsor_id].name} (ID:{sponsor_id})")
     return new_member, info
 
-def get_ancestors_cuan(member_id, members, max_level=7):
+def get_ancestors_cuan(member_id, members, max_level):
     ancestors = []
     cur = members[member_id].parent_id
     level = 1
@@ -77,7 +84,7 @@ def get_ancestors_cuan(member_id, members, max_level=7):
         level += 1
     return ancestors
 
-def get_ancestors_rich(member_id, members, max_level=7):
+def get_ancestors_rich(member_id, members, max_level):
     ancestors = []
     cur = members[member_id].sponsor_id
     level = 1
@@ -98,7 +105,8 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
     bonus_cuan = 0
     breakdown_cuan = []
     if member.is_active:
-        ancestors = get_ancestors_cuan(member_id, members)
+        max_level = st.session_state.max_level
+        ancestors = get_ancestors_cuan(member_id, members, max_level)
         valid = []
         for anc_id, lvl in ancestors:
             if members[anc_id].is_active:
@@ -106,24 +114,32 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
             else:
                 break
         n = len(valid)
+        komisi_reg = st.session_state.komisi_reguler
+        komisi_last = st.session_state.komisi_last_ancestor
+        # Tentukan posisi last ancestor berdasarkan pilihan user
+        if st.session_state.last_ancestor_position == "Level Tertinggi (paling dekat root)":
+            last_index = n - 1
+        else:
+            last_index = 0
         for i, (anc_id, lvl) in enumerate(valid):
-            komisi = 9000 if i == n-1 else 4000
+            komisi = komisi_last if i == last_index else komisi_reg
             if apply_to_balance:
                 members[anc_id].balance_cuan += komisi
                 st.session_state.total_bonus_cuan += komisi
             bonus_cuan += komisi
             nama = members[anc_id].name
-            deskripsi = f"Matrix Level {lvl} ({'Last Ancestor (Rp9000)' if i==n-1 else 'Reguler Rp4000'})"
+            posisi = "Last Ancestor" if i == last_index else "Reguler"
+            deskripsi = f"Matrix Level {lvl} ({posisi}) Rp{komisi:,}"
             breakdown_cuan.append((anc_id, nama, deskripsi, komisi))
     sponsor_id = member.sponsor_id
     if sponsor_id and sponsor_id in members:
-        komisi_sp = 1000
+        komisi_sp = st.session_state.komisi_sponsor
         if apply_to_balance:
             members[sponsor_id].balance_cuan += komisi_sp
             st.session_state.total_bonus_cuan += komisi_sp
         bonus_cuan += komisi_sp
         nama_sp = members[sponsor_id].name
-        breakdown_cuan.append((sponsor_id, nama_sp, "Bonus Sponsor (Rp1000)", komisi_sp))
+        breakdown_cuan.append((sponsor_id, nama_sp, f"Bonus Sponsor Rp{komisi_sp:,}", komisi_sp))
 
     return {
         'buyer_name': member.name,
@@ -147,15 +163,17 @@ def process_transaction_rich(member_id, amount, apply_to_balance=False):
 
     bonus_rich = 0
     breakdown_rich = []
-    ancestors_rich = get_ancestors_rich(member_id, members)
+    max_level = st.session_state.max_level
+    komisi_per_level = st.session_state.komisi_rich_per_level
+    ancestors_rich = get_ancestors_rich(member_id, members, max_level)
     for anc_id, lvl in ancestors_rich:
-        komisi = 5000
+        komisi = komisi_per_level
         if apply_to_balance:
             members[anc_id].balance_rich += komisi
             st.session_state.total_bonus_rich += komisi
         bonus_rich += komisi
         nama = members[anc_id].name
-        breakdown_rich.append((anc_id, nama, f"Level {lvl} (Rp5000)", komisi))
+        breakdown_rich.append((anc_id, nama, f"Level {lvl} Rp{komisi:,}", komisi))
     return {
         'buyer_name': member.name,
         'buyer_id': member_id,
@@ -328,6 +346,18 @@ def main():
             create_sample_network()
         if st.button("🗑️ Reset Aplikasi", use_container_width=True):
             reset_app()
+        st.markdown("---")
+        st.header("⚙️ Pengaturan Komisi")
+        st.session_state.komisi_reguler = st.number_input("Komisi Matrix Reguler (per level)", min_value=0, value=4000, step=500, key="reg")
+        st.session_state.komisi_last_ancestor = st.number_input("Komisi Last Ancestor Bonus", min_value=0, value=9000, step=500, key="last")
+        st.session_state.komisi_sponsor = st.number_input("Bonus Sponsor Langsung", min_value=0, value=1000, step=500, key="spons")
+        st.session_state.komisi_rich_per_level = st.number_input("Komisi Auto Rich per Level", min_value=0, value=5000, step=500, key="rich")
+        st.session_state.max_level = st.number_input("Maksimal Level Komisi (1-7)", min_value=1, max_value=7, value=7, step=1, key="maxlvl")
+        st.session_state.last_ancestor_position = st.selectbox(
+            "Posisi Last Ancestor Bonus",
+            options=["Level Tertinggi (paling dekat root)", "Level Terendah (parent langsung pembayar)"],
+            index=0
+        )
         st.markdown("---")
         st.header("📊 Ringkasan Cepat")
         total_member = len(st.session_state.members)
