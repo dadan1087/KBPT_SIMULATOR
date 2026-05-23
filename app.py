@@ -96,7 +96,7 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
         st.session_state.total_cash_in += amount
 
     bonus_cuan = 0
-    breakdown_cuan = []  # akan berisi (member_id, nama, deskripsi, nominal)
+    breakdown_cuan = []
     if member.is_active:
         ancestors = get_ancestors_cuan(member_id, members)
         valid = []
@@ -180,37 +180,63 @@ def get_descendants_rich(root_id, members):
                 stack.append(mid)
     return result
 
-def get_member_tree_cuan(root_id, members):
+def get_member_tree_cuan(root_id, members, search_id=None):
+    """Mengembalikan string DOT graph dengan layout horizontal dan highlight untuk search_id"""
     if root_id not in members:
         return ""
-    lines = []
+    lines = ['digraph G {', '    rankdir=LR;', '    node [shape=box, style=filled, fillcolor=lightblue];']
     queue = deque([root_id])
     while queue:
         nid = queue.popleft()
         node = members[nid]
-        label = f"{node.name} (ID:{nid})\n{'Aktif' if node.is_active else 'Tdk Aktif'}"
-        lines.append(f'    "{nid}" [label="{label}"];')
+        # Tentukan warna node
+        if search_id == nid:
+            fillcolor = "yellow"
+            fontcolor = "black"
+        else:
+            if node.is_active:
+                fillcolor = "lightgreen"
+            else:
+                fillcolor = "lightgray"
+            fontcolor = "black"
+        label = f"{node.name}\\n(ID:{nid})\\n{'Aktif' if node.is_active else 'Tdk Aktif'}"
+        lines.append(f'    "{nid}" [label="{label}", fillcolor="{fillcolor}", fontcolor="{fontcolor}"];')
         if node.left_child_id:
-            lines.append(f'    "{nid}" -> "{node.left_child_id}";')
+            lines.append(f'    "{nid}" -> "{node.left_child_id}" [label="kiri"];')
             queue.append(node.left_child_id)
         if node.right_child_id:
-            lines.append(f'    "{nid}" -> "{node.right_child_id}";')
+            lines.append(f'    "{nid}" -> "{node.right_child_id}" [label="kanan"];')
             queue.append(node.right_child_id)
-    return "digraph G {\n" + "\n".join(lines) + "\n}"
+    lines.append('}')
+    return "\n".join(lines)
 
-def get_member_tree_rich(root_id, members):
+def get_member_tree_rich(root_id, members, search_id=None):
+    """Mengembalikan string DOT graph untuk sponsor tree"""
     descendants = get_descendants_rich(root_id, members)
     if not descendants:
         return ""
-    lines = []
+    lines = ['digraph G {', '    rankdir=LR;', '    node [shape=box, style=filled, fillcolor=lightblue];']
+    # Node labels
     for nid in descendants:
         node = members[nid]
-        lines.append(f'    "{nid}" [label="{node.name} (ID:{nid})\\nSaldo R: {node.balance_rich:,}"];')
+        if search_id == nid:
+            fillcolor = "yellow"
+            fontcolor = "black"
+        else:
+            if node.is_active:
+                fillcolor = "lightgreen"
+            else:
+                fillcolor = "lightgray"
+            fontcolor = "black"
+        label = f"{node.name}\\n(ID:{nid})\\nSaldo R: {node.balance_rich:,}"
+        lines.append(f'    "{nid}" [label="{label}", fillcolor="{fillcolor}", fontcolor="{fontcolor}"];')
+    # Edges
     for nid in descendants:
         node = members[nid]
         if node.sponsor_id and node.sponsor_id in descendants:
             lines.append(f'    "{node.sponsor_id}" -> "{nid}";')
-    return "digraph G {\n" + "\n".join(lines) + "\n}"
+    lines.append('}')
+    return "\n".join(lines)
 
 def create_sample_network():
     members = st.session_state.members
@@ -252,7 +278,6 @@ def product_card(product, member_id):
             else:
                 res = process_transaction_rich(member_id, product['price'], apply_to_balance=True)
             if res:
-                # Simpan tracking dengan nama
                 tx_detail = []
                 if product['type'] == 'cuan':
                     for (mid, nama, desc, nominal) in res['breakdown_cuan']:
@@ -287,7 +312,6 @@ def product_card(product, member_id):
                     if 'ancestors_cuan' in res:
                         for aid, lvl in res['ancestors_cuan']:
                             st.write(f"Level {lvl}: {st.session_state.members[aid].name} (ID:{aid})")
-                # Tampilkan breakdown
                 df = pd.DataFrame(tx_detail)
                 st.dataframe(df, use_container_width=True)
                 st.balloons()
@@ -407,17 +431,29 @@ def main():
 
     with tab4:
         st.header("🌳 Visualisasi Jaringan")
-        net_type = st.radio("Pilih jenis", ["Auto Cuan (Binary)", "Auto Rich (Sponsor)"])
+        net_type = st.radio("Pilih jenis jaringan", ["Auto Cuan (Binary / Placement)", "Auto Rich (Sponsor Tree)"])
         root_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
-        root_id = st.selectbox("Root", options=list(root_options.keys()), format_func=lambda x: root_options[x])
-        if net_type == "Auto Cuan (Binary)":
-            dot = get_member_tree_cuan(root_id, st.session_state.members)
+        root_id = st.selectbox("Root / Member awal", options=list(root_options.keys()), format_func=lambda x: root_options[x])
+        # Fitur pencarian member
+        search_term = st.text_input("🔍 Cari member (nama atau ID)", placeholder="Contoh: Member 1 atau ID 5")
+        search_id = None
+        if search_term:
+            # Cari berdasarkan nama (case insensitive) atau ID
+            search_term_lower = search_term.lower()
+            for m in st.session_state.members.values():
+                if search_term_lower == m.name.lower() or search_term == str(m.id):
+                    search_id = m.id
+                    break
+            if search_id is None:
+                st.warning("Member tidak ditemukan.")
+        if net_type == "Auto Cuan (Binary / Placement)":
+            dot = get_member_tree_cuan(root_id, st.session_state.members, search_id)
         else:
-            dot = get_member_tree_rich(root_id, st.session_state.members)
+            dot = get_member_tree_rich(root_id, st.session_state.members, search_id)
         if dot:
             st.graphviz_chart(dot)
         else:
-            st.warning("Pohon kosong")
+            st.warning("Pohon kosong atau root tidak ditemukan.")
 
 if __name__ == "__main__":
     main()
