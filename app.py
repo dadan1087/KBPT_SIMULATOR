@@ -181,15 +181,16 @@ def get_descendants_rich(root_id, members):
     return result
 
 def get_member_tree_cuan(root_id, members, search_id=None):
-    """Mengembalikan string DOT graph dengan layout horizontal dan highlight untuk search_id"""
+    """Mengembalikan string DOT graph dengan layout top-bottom (root di atas)"""
     if root_id not in members:
         return ""
-    lines = ['digraph G {', '    rankdir=LR;', '    node [shape=box, style=filled, fillcolor=lightblue];']
+    lines = ['digraph G {', '    rankdir=TB;', '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial"];']
+    # Tambahkan margin agar tidak terpotong
+    lines.append('    margin=0;')
     queue = deque([root_id])
     while queue:
         nid = queue.popleft()
         node = members[nid]
-        # Tentukan warna node
         if search_id == nid:
             fillcolor = "yellow"
             fontcolor = "black"
@@ -202,21 +203,21 @@ def get_member_tree_cuan(root_id, members, search_id=None):
         label = f"{node.name}\\n(ID:{nid})\\n{'Aktif' if node.is_active else 'Tdk Aktif'}"
         lines.append(f'    "{nid}" [label="{label}", fillcolor="{fillcolor}", fontcolor="{fontcolor}"];')
         if node.left_child_id:
-            lines.append(f'    "{nid}" -> "{node.left_child_id}" [label="kiri"];')
+            lines.append(f'    "{nid}" -> "{node.left_child_id}";')
             queue.append(node.left_child_id)
         if node.right_child_id:
-            lines.append(f'    "{nid}" -> "{node.right_child_id}" [label="kanan"];')
+            lines.append(f'    "{nid}" -> "{node.right_child_id}";')
             queue.append(node.right_child_id)
     lines.append('}')
     return "\n".join(lines)
 
 def get_member_tree_rich(root_id, members, search_id=None):
-    """Mengembalikan string DOT graph untuk sponsor tree"""
+    """Mengembalikan string DOT graph untuk sponsor tree, top-bottom"""
     descendants = get_descendants_rich(root_id, members)
     if not descendants:
         return ""
-    lines = ['digraph G {', '    rankdir=LR;', '    node [shape=box, style=filled, fillcolor=lightblue];']
-    # Node labels
+    lines = ['digraph G {', '    rankdir=TB;', '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial"];']
+    lines.append('    margin=0;')
     for nid in descendants:
         node = members[nid]
         if search_id == nid:
@@ -230,7 +231,6 @@ def get_member_tree_rich(root_id, members, search_id=None):
             fontcolor = "black"
         label = f"{node.name}\\n(ID:{nid})\\nSaldo R: {node.balance_rich:,}"
         lines.append(f'    "{nid}" [label="{label}", fillcolor="{fillcolor}", fontcolor="{fontcolor}"];')
-    # Edges
     for nid in descendants:
         node = members[nid]
         if node.sponsor_id and node.sponsor_id in descendants:
@@ -319,7 +319,7 @@ def product_card(product, member_id):
                 st.error("Gagal transaksi")
 
 def main():
-    st.set_page_config(page_title="K-BBPT E-commerce Simulator", layout="wide")
+    st.set_page_config(page_title="K-BBPT Simulator", layout="wide")
     st.title("🛍️ K-BBPT Simulator - Belanja & Komisi")
     st.markdown("**Auto Cuan** (belanja ≥ Rp100.000) | **Auto Rich** (belanja bebas)")
 
@@ -434,11 +434,10 @@ def main():
         net_type = st.radio("Pilih jenis jaringan", ["Auto Cuan (Binary / Placement)", "Auto Rich (Sponsor Tree)"])
         root_options = {m.id: f"{m.name} (ID:{m.id})" for m in st.session_state.members.values()}
         root_id = st.selectbox("Root / Member awal", options=list(root_options.keys()), format_func=lambda x: root_options[x])
-        # Fitur pencarian member
+        # Pencarian
         search_term = st.text_input("🔍 Cari member (nama atau ID)", placeholder="Contoh: Member 1 atau ID 5")
         search_id = None
         if search_term:
-            # Cari berdasarkan nama (case insensitive) atau ID
             search_term_lower = search_term.lower()
             for m in st.session_state.members.values():
                 if search_term_lower == m.name.lower() or search_term == str(m.id):
@@ -446,12 +445,14 @@ def main():
                     break
             if search_id is None:
                 st.warning("Member tidak ditemukan.")
+        # Tampilkan grafik
         if net_type == "Auto Cuan (Binary / Placement)":
             dot = get_member_tree_cuan(root_id, st.session_state.members, search_id)
         else:
             dot = get_member_tree_rich(root_id, st.session_state.members, search_id)
         if dot:
             st.graphviz_chart(dot)
+            st.caption("💡 Tips: Gunakan Ctrl + Scroll untuk zoom. Klik kanan pada gambar untuk menyimpan.")
         else:
             st.warning("Pohon kosong atau root tidak ditemukan.")
 
